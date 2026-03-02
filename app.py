@@ -2,6 +2,9 @@ import re
 from pathlib import Path
 import streamlit as st
 
+# ----------------------------
+# Page config (no sidebar, wall-screen friendly)
+# ----------------------------
 st.set_page_config(
     page_title="Ops Infoboard",
     page_icon="🛰️",
@@ -9,6 +12,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# ----------------------------
+# Low-glare dark styling
+# ----------------------------
 CSS = """
 <style>
   .stApp { background: #0b0f14; color: #e6edf3; }
@@ -46,10 +52,27 @@ CSS = """
   .status-closed    { color: rgba(255,77,79,1.0); font-weight: 900; }
   .status-partial   { color: rgba(255,169,64,1.0); font-weight: 900; }
   .status-restrict  { color: rgba(250,219,20,1.0); font-weight: 900; }
+
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
 
+# ----------------------------
+# Update.txt format rules (your declared "truth")
+# ----------------------------
+BORDER_HEADERS = [
+    "UAE-Oman",
+    "UAE-Saudi Arabia",
+    "Israel-Egypt",
+    "Israel-Jordan",
+    "Iran-Turkiye",
+    "Iran-Armenia",
+]
+
+# ----------------------------
+# Helpers
+# ----------------------------
 def load_update(path="update.txt") -> str:
     p = Path(path)
     if not p.exists():
@@ -59,57 +82,28 @@ def load_update(path="update.txt") -> str:
 
 def normalize(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\u00a0", " ")
+    # normalize dashed separators: any line with 6+ dashes becomes the delimiter token
+    text = re.sub(r"(?m)^\s*-{6,}\s*$", "------------------", text)
+    # collapse excessive blank lines
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
 
-def split_sections(raw: str):
-    airspace_match = re.search(r"(?im)^\s*AIRSPACE\s*$", raw)
-    impacts_match = re.search(r"(?im)^\s*Confirmed impacts", raw)
-
-    borders_block = raw
-    airspace_block = ""
-    impacts_block = ""
-
-    if airspace_match:
-        borders_block = raw[:airspace_match.start()].strip()
-        rest = raw[airspace_match.end():].strip()
-        impacts_match2 = re.search(r"(?im)^\s*Confirmed impacts", rest)
-        if impacts_match2:
-            airspace_block = rest[:impacts_match2.start()].strip()
-            impacts_block = rest[impacts_match2.start():].strip()
-        else:
-            airspace_block = rest
-
-    if (not airspace_match) and impacts_match:
-        borders_block = raw[:impacts_match.start()].strip()
-        impacts_block = raw[impacts_match.start():].strip()
-
-    return borders_block, airspace_block, impacts_block
-
-def infer_status(text: str) -> str:
-    t = (text or "").lower()
-    if "closed" in t or "closes its airspace" in t:
-        return "CLOSED"
-    if "partial" in t:
-        return "PARTIAL"
-    if "restrict" in t:
-        return "RESTRICTED"
-    if re.search(r"\bopen\b", t):
-        return "OPEN"
-    return ""
-
 def status_class(status: str) -> str:
-    s = (status or "").upper()
-    if s == "CLOSED": return "status-closed"
-    if s == "PARTIAL": return "status-partial"
-    if s == "RESTRICTED": return "status-restrict"
-    if s == "OPEN": return "status-open"
+    s = (status or "").strip().lower()
+    if s == "closed":
+        return "status-closed"
+    if s == "partial":
+        return "status-partial"
+    if s in ("restricted", "restrict", "restriction"):
+        return "status-restrict"
+    if s == "open":
+        return "status-open"
     return ""
 
-def render_card(name, status, bullets):
+def render_card(name: str, status: str, bullets: list[str]):
     s_cls = status_class(status)
-    status_html = f'<span class="{s_cls}">{status}</span>' if status else ""
-    bullet_html = "<br/>".join([f"• {b}" for b in bullets]) if bullets else "• —"
+    status_html = f'<span class="{s_cls}">{status.upper()}</span>' if status else ""
+    bullet_html = "<br/>".join([f"• {b}" for b in bullets if b.strip()]) if bullets else "• —"
     st.markdown(
         f"""
         <div class="card">
@@ -122,111 +116,241 @@ def render_card(name, status, bullets):
         unsafe_allow_html=True
     )
 
+def split_blocks(raw: str):
+    """
+    Expected structure:
+      [Borders section ...]
+      ------------------
+      AIRSPACE
+      [Airspace lines ...]
+      ------------------
+      [Impacts section ...]
+    """
+    parts = [p.strip() for p in raw.split("------------------")]
+    # Be resilient if someone accidentally adds extra separators
+    parts = [p for p in parts if p]
+
+    borders_block = parts[0] if len(parts) >= 1 else ""
+    airspace_block = ""
+    impacts_block = ""
+
+    if len(parts) >= 2:
+        airspace_block = parts[1]
+    if len(parts) >= 3:
+        impacts_block = parts[2]
+
+    return borders_block, airspace_block, impacts_block
+
+# ----------------------------
+# Parsing: Borders (exact headers)
+# ----------------------------
 def parse_borders(block: str):
+    """
+    Uses exact border headers.
+    Everything after a header until the next header is its body.
+    """
+    # Remove the intro line if present
     lines = [ln.strip() for ln in block.split("\n")]
+
+    # Build a single string with line breaks preserved
+    text = "\n".join(lines).strip()
+
+    # Find positions of each header in the text (as whole lines)
+    # We'll search line-by-line for exact matches to avoid false positives.
+    idxs = []
+    for i, ln in enumerate(lines):
+        if ln in BORDER_HEADERS:
+            idxs.append((i, ln))
+
     items = []
-    current = None
+    for n, (start_i, header) in enumerate(idxs):
+        end_i = idxs[n + 1][0] if n + 1 < len(idxs) else len(lines)
+        body_lines = [l.strip() for l in lines[start_i + 1:end_i] if l.strip()]
+
+        # Condense body: keep as up to 4 bullets:
+        # - split by blank lines AND by sentence boundaries lightly
+        body_text = " ".join(body_lines).strip()
+
+        bullets = []
+        if body_text:
+            # Keep operator-readable chunks: split by sentence endings, cap at 4
+            parts = re.split(r"(?<=[.!?])\s+", body_text)
+            for p in parts:
+                p = p.strip()
+                if p:
+                    bullets.append(p)
+                if len(bullets) >= 4:
+                    break
+
+        # Infer a simple status from the body (Open/Closed/Restricted/Partial)
+        status = ""
+        t = body_text.lower()
+        if re.search(r"\bclosed\b", t):
+            status = "closed"
+        elif re.search(r"\bpartial\b", t):
+            status = "partial"
+        elif "restrict" in t:
+            status = "restricted"
+        elif re.search(r"\bopen\b", t):
+            status = "open"
+
+        items.append({"name": header, "status": status, "bullets": bullets})
+
+    # If headers are missing (bad paste), show a minimal fallback card
+    if not items:
+        items.append({
+            "name": "Borders (format issue)",
+            "status": "",
+            "bullets": ["Could not detect border headers. Ensure exact header lines are used."]
+        })
+
+    return items
+
+# ----------------------------
+# Parsing: Airspace (Country status; optional notes)
+# ----------------------------
+def parse_airspace(block: str):
+    """
+    Expected lines after the AIRSPACE title:
+      Israel closed
+      UAE partial closure
+      Jordan open; flight availability impacted...
+    Rules:
+      - Country is first token/group until status word.
+      - Status is one of: open, closed, partial
+      - Optional notes after ';' (or after status if extra text exists).
+    """
+    lines = [ln.strip() for ln in block.split("\n") if ln.strip()]
+    # Drop "AIRSPACE" title line if present
+    if lines and lines[0].strip().upper() == "AIRSPACE":
+        lines = lines[1:]
+
+    items = []
+    status_words = ["open", "closed", "partial"]
+
+    for ln in lines:
+        # Split notes if present
+        main, sep, tail = ln.partition(";")
+        main = main.strip()
+        notes = tail.strip() if sep else ""
+
+        # Extract "country" + status from main
+        # Examples:
+        #   "Israel closed"
+        #   "UAE partial closure"  -> status=partial, leftover="closure" should go into notes
+        m = re.match(r"^(?P<country>.+?)\s+(?P<status>open|closed|partial)\b(?P<rest>.*)$", main, flags=re.I)
+        if not m:
+            # If badly formed, show whole line as a note
+            items.append({"country": ln, "status": "", "notes": ""})
+            continue
+
+        country = m.group("country").strip()
+        status = m.group("status").strip().lower()
+        rest = (m.group("rest") or "").strip()
+
+        # If there's extra text after status (like "closure" or "and absorbing..."), treat as notes
+        if rest:
+            rest = rest.lstrip(" -–—:").strip()
+            if rest:
+                notes = (rest + ((" " + notes) if notes else "")).strip()
+
+        # Remove pointless notes that equal the country name
+        if notes.lower().strip(". ") == country.lower().strip(". "):
+            notes = ""
+
+        items.append({"country": country, "status": status, "notes": notes})
+
+    if not items:
+        items.append({"country": "Airspace (no entries)", "status": "", "notes": ""})
+
+    return items
+
+# ----------------------------
+# Parsing: Impacts (exact headers: Country:)
+# ----------------------------
+def parse_impacts(block: str):
+    """
+    Country headers are EXACTLY the country name before ":".
+    Text can span multiple lines until the next "X:" header or end.
+    """
+    lines = [ln.rstrip() for ln in block.split("\n")]
+
+    # Remove the intro line if present
+    cleaned = []
+    for ln in lines:
+        if re.match(r"(?i)^\s*Confirmed impacts", ln.strip()):
+            continue
+        cleaned.append(ln)
+
+    lines = cleaned
+
+    items = []
+    current_country = None
     buf = []
 
     def flush():
-        nonlocal current, buf
-        if current:
-            text = " ".join([b for b in buf if b]).strip()
-            status = infer_status(text)
-            bullets = []
-            if text:
-                parts = re.split(r"(?<=[.!?])\s+", text)
-                for p in parts:
-                    p = p.strip()
-                    if p:
-                        bullets.append(p)
-                    if len(bullets) >= 3:
-                        break
-            items.append({"name": current, "status": status, "bullets": bullets})
-        current, buf = None, []
-
-    heading_re = re.compile(r"^[A-Za-z0-9][A-Za-z0-9/()\-\s]{2,}$")
+        nonlocal current_country, buf, items
+        if current_country is None:
+            buf = []
+            return
+        text = " ".join([b.strip() for b in buf if b.strip()]).strip()
+        bullets = []
+        if text:
+            parts = re.split(r"(?<=[.!?])\s+", text)
+            for p in parts:
+                p = p.strip()
+                if p:
+                    bullets.append(p)
+                if len(bullets) >= 3:
+                    break
+        # If empty (e.g., "Oman:"), still show a placeholder dash
+        items.append({"country": current_country, "bullets": bullets if bullets else ["—"]})
+        current_country, buf = None, []
 
     for ln in lines:
-        if not ln:
+        s = ln.strip()
+        if not s:
             continue
-        if ln.lower().startswith("land border status"):
-            continue
-        if (not ln.endswith(".")) and heading_re.match(ln) and len(ln) <= 80:
+
+        m = re.match(r"^([A-Za-z][A-Za-z\s\-/]+):\s*(.*)$", s)
+        if m:
+            # new header
             flush()
-            current = ln
-            continue
-        if current:
-            buf.append(ln)
+            current_country = m.group(1).strip()
+            remainder = m.group(2).strip()
+            if remainder:
+                buf.append(remainder)
+        else:
+            # continuation line
+            if current_country is not None:
+                buf.append(s)
 
     flush()
+
+    if not items:
+        items.append({"country": "Impacts (no entries)", "bullets": ["—"]})
+
     return items
 
-def parse_airspace(block: str):
-    items = []
-    for ln in [l.strip() for l in block.split("\n") if l.strip()]:
-        region = ln
-        m = re.match(r"^([A-Za-z][A-Za-z\s\-]+?)\s+(closes|announces|airspace)\b", ln, flags=re.I)
-        if m:
-            region = m.group(1).strip()
-
-        status = infer_status(ln)
-
-        # note cleanup
-        note = ln.strip()
-
-        # If it's exactly "X closes its airspace." → note should be empty
-        note = re.sub(r"(?i)^\s*"+re.escape(region)+r"\s+closes its airspace\.?\s*$", "", note).strip()
-
-        # General cleanup (keeps useful extras like timings/NOTAM details)
-        note = re.sub(r"(?i)\bcloses its airspace\.?\s*", "", note).strip()
-
-        # If note collapses to just the region name, drop it
-        if note.lower().strip(". ") == region.lower().strip(". "):
-            note = ""
-
-        items.append({"region": region, "status": status, "note": note})
-    return items
-
-def parse_impacts(block: str):
-    block = re.sub(r"(?im)^\s*Confirmed impacts.*\n?", "", block).strip()
-    items = []
-    for ln in [l.strip() for l in block.split("\n") if l.strip()]:
-        m = re.match(r"^([A-Za-z][A-Za-z\s\-/]+?):\s*(.*)$", ln)
-        if m:
-            country = m.group(1).strip()
-            text = m.group(2).strip()
-            items.append({"country": country, "text": text})
-        else:
-            if items:
-                items[-1]["text"] = (items[-1]["text"] + " " + ln).strip()
-
-    out = []
-    for it in items:
-        bullets = []
-        parts = re.split(r"(?<=[.!?])\s+", it["text"])
-        for p in parts:
-            p = p.strip()
-            if p:
-                bullets.append(p)
-            if len(bullets) >= 2:
-                break
-        out.append({"country": it["country"], "bullets": bullets})
-    return out
-
+# ----------------------------
+# Load + parse
+# ----------------------------
 raw = normalize(load_update("update.txt"))
-borders_block, airspace_block, impacts_block = split_sections(raw)
+borders_block, airspace_block, impacts_block = split_blocks(raw)
 
 borders = parse_borders(borders_block)
-airspace = parse_airspace(airspace_block) if airspace_block else []
-impacts = parse_impacts(impacts_block) if impacts_block else []
+airspace = parse_airspace(airspace_block)
+impacts = parse_impacts(impacts_block)
 
-# Header: try to detect "as of Month Day"
+# Try to detect an "as of Month Day" anywhere in the text (optional)
 as_of = ""
 m_asof = re.search(r"(?i)\bas of\s+([A-Za-z]+\s+\d{1,2})", raw)
 if m_asof:
     as_of = m_asof.group(1)
 
+# ----------------------------
+# Header
+# ----------------------------
 st.markdown(
     f"""
     <div class="topbar">
@@ -237,6 +361,9 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# ----------------------------
+# Main 3-column board
+# ----------------------------
 c1, c2, c3 = st.columns([1.25, 1.0, 1.0], gap="large")
 
 with c1:
@@ -247,8 +374,12 @@ with c1:
 with c2:
     st.markdown('<div class="section-title">AIRSPACE</div>', unsafe_allow_html=True)
     for a in airspace:
-        # show 1 concise bullet per line item
-        render_card(a["region"], a["status"], [a["note"]] if a["note"] else [])
+        bullets = []
+        if a["notes"]:
+            bullets = [a["notes"]]
+        else:
+            bullets = ["—"]
+        render_card(a["country"], a["status"], bullets)
 
 with c3:
     st.markdown('<div class="section-title">CONFIRMED IMPACTS</div>', unsafe_allow_html=True)
