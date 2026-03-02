@@ -30,22 +30,24 @@ Iran-Armenia
 
 Agarak/Norduz BXP open 24/7. No reports of delays.
 
+------------------
 
 AIRSPACE
 
-Israel closes its airspace.
-Iran closes its airspace.
-Iraq closes its airspace.
-Qatar closes its airspace.
-Bahrain closes its airspace.
-Kuwait closes its airspace.
-Syria closes its airspace until at least 23:59 March 2. (search NOTAM, free text: Damascus) (A0065/26 NOTAMR A0060/26 Q) OSTT/QAFLC/IV/NBO/E/000/999 A) OSTT B) 2603011900 C) 2603022100 EST E) DAMASCUS FIR CLSD DUE TO OPS REASONS.)
-UAE announces partial closure of airspace.
-Saudi airspace open and absorbing reroutes from northern corridors.
-Jordanian airspace open; flight availability impacted by regional airspace closures and specific airline cancellations. (https://x.com/Carc_jo)
-Oman airspace open; flight availability impacted by regional airspace closures and specific airline cancellations.
-Egypt airspace open.
+Israel closed 
+Iran closed
+Iraq closed
+Qatar closed
+Bahrain closed
+Kuwait closed
+Syria closed until at least 23:59 March 2.
+UAE partial closure
+Saudi open and absorbing reroutes from northern corridors.
+Jordan open; flight availability impacted by regional airspace closures and specific airline cancellations. (https://x.com/Carc_jo)
+Oman open; flight availability impacted by regional airspace closures and specific airline cancellations.
+Egypt open.
 
+------------------
 
 Confirmed impacts of direct or indirect targeting in Israel, Iran, Oman or any Gulf country. 
 
