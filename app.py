@@ -340,6 +340,7 @@ borders_block, airspace_block, impacts_block = split_blocks(raw)
 borders = parse_borders(borders_block)
 airspace = parse_airspace(airspace_block)
 impacts = parse_impacts(impacts_block)
+impacts = sorted(impacts, key=lambda x: x.get("country","").casefold())
 
 # Optional: detect "as of Month Day" anywhere
 as_of = ""
