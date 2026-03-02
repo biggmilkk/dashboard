@@ -53,10 +53,7 @@ CSS = """
   .status-partial   { color: rgba(255,169,64,1.0); }
   .status-restrict  { color: rgba(250,219,20,1.0); }
 
-  /* Make Streamlit columns slightly tighter */
   div[data-testid="column"] { padding-top: 0px; }
-
-  /* Slightly reduce default block spacing */
   .block-container { padding-top: 1.0rem; padding-bottom: 0.8rem; }
 </style>
 """
@@ -86,9 +83,7 @@ def load_update(path="update.txt") -> str:
 
 def normalize(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\u00a0", " ")
-    # normalize dashed separators: any line with 6+ dashes becomes the delimiter token
-    text = re.sub(r"(?m)^\s*-{6,}\s*$", "------------------", text)
-    # collapse excessive blank lines
+    text = re.sub(r"(?m)^\s*-{6,}\s*$", "------------------", text)  # normalize separators
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
 
@@ -104,22 +99,7 @@ def status_class(status: str) -> str:
         return "status-open"
     return ""
 
-def infer_status_from_text(text: str) -> str:
-    t = (text or "").lower()
-    if re.search(r"\bclosed\b", t):
-        return "closed"
-    if re.search(r"\bpartial\b", t):
-        return "partial"
-    if "restrict" in t:
-        return "restricted"
-    if re.search(r"\bopen\b", t):
-        return "open"
-    return ""
-
 def capitalize_first_alpha(s: str) -> str:
-    """
-    Capitalize the first alphabetic character in the string (keeps leading punctuation/whitespace).
-    """
     if not s:
         return ""
     chars = list(s)
@@ -135,23 +115,57 @@ def clamp_text(s: str, max_len: int) -> str:
         return s
     return s[: max_len - 1].rstrip() + "…"
 
-def render_card(name: str, status: str, bullets: list[str], *,
-                show_placeholder: bool = True,
-                max_bullets: int = 3,
-                max_bullet_len: int = 180):
+def infer_status_from_text(text: str) -> str:
     """
-    Bigger name + status, small notes.
+    Border status inference with a 'partial' rule:
+    - If both OPEN-like and CLOSED-like signals exist, show PARTIAL.
+    - This handles cases like Israel-Jordan: one crossing open, others closed.
     """
+    t = (text or "").lower()
+
+    open_hit = bool(re.search(r"\bopen\b|\bremains open\b", t))
+    closed_hit = bool(re.search(r"\bclosed\b|\breportedly closed\b|\ball other\b.*\bclosed\b", t))
+    partial_hit = bool(re.search(r"\bpartial\b", t))
+    restrict_hit = "restrict" in t
+
+    # Explicit partial
+    if partial_hit:
+        return "partial"
+
+    # Mixed signals => partial
+    if open_hit and (closed_hit or restrict_hit):
+        return "partial"
+
+    # Otherwise normal precedence
+    if restrict_hit:
+        return "restricted"
+    if closed_hit:
+        return "closed"
+    if open_hit:
+        return "open"
+    return ""
+
+def render_card(
+    name: str,
+    status: str,
+    bullets: list[str],
+    *,
+    show_placeholder: bool = True,
+    max_bullets: int = 3,
+    max_bullet_len: int = 180,
+    truncate: bool = True,
+):
     name = (name or "").strip()
     status = (status or "").strip().lower()
 
     s_cls = status_class(status)
-    status_html = ""
-    if status:
-        status_html = f'<div class="statusline {s_cls}">{status.upper()}</div>'
+    status_html = f'<div class="statusline {s_cls}">{status.upper()}</div>' if status else ""
 
-    bullets = [clamp_text(b, max_bullet_len) for b in (bullets or []) if b and b.strip()]
+    bullets = [b.strip() for b in (bullets or []) if b and b.strip()]
     bullets = bullets[:max_bullets]
+
+    if truncate:
+        bullets = [clamp_text(b, max_bullet_len) for b in bullets]
 
     if bullets:
         notes_html = "<br/>".join([f"• {b}" for b in bullets])
@@ -196,7 +210,6 @@ def parse_borders(block: str):
 
         status = infer_status_from_text(body_text)
 
-        # compact bullets: max 3 sentences, trimmed later in render_card
         bullets = []
         if body_text:
             parts = re.split(r"(?<=[.!?])\s+", body_text)
@@ -234,7 +247,6 @@ def parse_airspace(block: str):
 
         m = re.match(r"^(?P<country>.+?)\s+(?P<status>open|closed|partial)\b(?P<rest>.*)$", main, flags=re.I)
         if not m:
-            # fallback: show whole line as a "country" label
             items.append({"country": ln, "status": "", "notes": ""})
             continue
 
@@ -242,16 +254,13 @@ def parse_airspace(block: str):
         status = m.group("status").strip().lower()
         rest = (m.group("rest") or "").strip()
 
-        # extra text after status becomes notes (e.g., "Saudi open and absorbing reroutes...")
         if rest:
             rest = rest.lstrip(" -–—:").strip()
             if rest:
                 notes = (rest + ((" " + notes) if notes else "")).strip()
 
-        # Capitalize first letter after ';' (i.e., first alphabetic char in notes)
         notes = capitalize_first_alpha(notes)
 
-        # Drop pointless notes that equal the country name
         if notes.lower().strip(". ") == country.lower().strip(". "):
             notes = ""
 
@@ -345,18 +354,14 @@ st.markdown(
     f"""
     <div class="topbar">
       <div class="title">Middle East - Status</div>
-      <div class="meta"><b>AS OF:</b> {as_of or "—"} </div>
+      <div class="meta"><b>AS OF:</b> {as_of or "—"}</div>
     </div>
     """,
     unsafe_allow_html=True
 )
 
 # ----------------------------
-# Single-screen packing strategy:
-# - Borders remain 1 column (usually longer narrative)
-# - Airspace split into 2 subcolumns to avoid vertical scroll
-# - Strike impacts split into 2 subcolumns to avoid vertical scroll
-# - Bullets capped + trimmed
+# Layout
 # ----------------------------
 c1, c2, c3 = st.columns([1.25, 1.0, 1.0], gap="large")
 
@@ -369,13 +374,13 @@ with c1:
             b["bullets"],
             show_placeholder=True,
             max_bullets=3,
-            max_bullet_len=210
+            max_bullet_len=210,
+            truncate=True
         )
 
 with c2:
     st.markdown('<div class="section-title">AIRSPACE</div>', unsafe_allow_html=True)
 
-    # split airspace into two subcolumns for height reduction
     a_left, a_right = st.columns(2, gap="small")
     for idx, a in enumerate(airspace):
         bullets = [a["notes"]] if a.get("notes") else []
@@ -385,15 +390,15 @@ with c2:
                 a["country"],
                 a["status"],
                 bullets,
-                show_placeholder=False,   # <-- no "• —" in airspace
-                max_bullets=1,            # keep it tight
-                max_bullet_len=140
+                show_placeholder=False,   # no "• —" in airspace
+                max_bullets=1,
+                max_bullet_len=140,
+                truncate=True
             )
 
 with c3:
     st.markdown('<div class="section-title">CONFIRMED STRIKE IMPACTS</div>', unsafe_allow_html=True)
 
-    # split impacts into two subcolumns for height reduction
     i_left, i_right = st.columns(2, gap="small")
     for idx, i in enumerate(impacts):
         target = i_left if idx % 2 == 0 else i_right
@@ -402,7 +407,8 @@ with c3:
                 i["country"],
                 "",
                 i["bullets"],
-                show_placeholder=True,  # show "—" for empty entries like "Oman:"
+                show_placeholder=True,   # show "—" for empty entries like "Oman:"
                 max_bullets=2,
-                max_bullet_len=140
+                max_bullet_len=9999,     # ignored if truncate=False
+                truncate=False           # <-- NO truncation for strike impacts
             )
