@@ -169,10 +169,22 @@ def parse_airspace(block: str):
         m = re.match(r"^([A-Za-z][A-Za-z\s\-]+?)\s+(closes|announces|airspace)\b", ln, flags=re.I)
         if m:
             region = m.group(1).strip()
+
         status = infer_status(ln)
+
+        # note cleanup
         note = ln.strip()
-        # small cleanup for readability
+
+        # If it's exactly "X closes its airspace." → note should be empty
+        note = re.sub(r"(?i)^\s*"+re.escape(region)+r"\s+closes its airspace\.?\s*$", "", note).strip()
+
+        # General cleanup (keeps useful extras like timings/NOTAM details)
         note = re.sub(r"(?i)\bcloses its airspace\.?\s*", "", note).strip()
+
+        # If note collapses to just the region name, drop it
+        if note.lower().strip(". ") == region.lower().strip(". "):
+            note = ""
+
         items.append({"region": region, "status": status, "note": note})
     return items
 
