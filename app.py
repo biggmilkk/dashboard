@@ -6,7 +6,7 @@ import streamlit as st
 # Page config (no sidebar, wall-screen friendly)
 # ----------------------------
 st.set_page_config(
-    page_title="Ops Infoboard",
+    page_title="Int-Ops Dashboard",
     page_icon="🛰️",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -344,8 +344,8 @@ if m_asof:
 st.markdown(
     f"""
     <div class="topbar">
-      <div class="title">Regional Disruptions — Quick View</div>
-      <div class="meta"><b>AS OF:</b> {as_of or "—"} &nbsp;&nbsp;|&nbsp;&nbsp; <b>BACKEND:</b> update.txt</div>
+      <div class="title">Middle East - Status</div>
+      <div class="meta"><b>AS OF:</b> {as_of or "—"} </div>
     </div>
     """,
     unsafe_allow_html=True
