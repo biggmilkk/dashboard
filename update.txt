@@ -37,6 +37,7 @@ Agarak/Norduz BXP open 24/7. No reports of delays.
 AIRSPACE
 
 Bahrain closed
+Cyprus open
 Egypt open
 Iran closed
 Iraq closed
@@ -48,7 +49,8 @@ Lebanon open
 Oman open; flight availability impacted by regional airspace closures and specific airline cancellations.
 Qatar closed
 Syria closed; until at least 23:59 March 2.
-UAE partial
+Turkiye open; limited flights to the Gulf.
+UAE partial; restricted by Emergency Security Control of Air Traffic (ESCAT) zones, effectively limiting commercial air traffic.
 
 
 ------------------
