@@ -2,7 +2,6 @@ import re
 from pathlib import Path
 import html as html_lib
 import streamlit as st
-import streamlit.components.v1 as components
 from streamlit_autorefresh import st_autorefresh
 
 # ----------------------------
@@ -201,20 +200,17 @@ def render_card(
         notes_html = '<div class="notes">• —</div>' if show_placeholder else ""
 
     st.markdown(
-        f"""
-        <div class="card">
-          <div class="name">{html_lib.escape(name)}</div>
-          {status_html}
-          {notes_html}
-        </div>
-        """,
+        f'<div class="card">'
+        f'<div class="name">{html_lib.escape(name)}</div>'
+        f'{status_html}'
+        f'{notes_html}'
+        f'</div>',
         unsafe_allow_html=True
     )
 
 def split_blocks_4(raw: str):
     parts = [p.strip() for p in raw.split("------------------")]
     parts = [p for p in parts if p]
-
     borders_block   = parts[0] if len(parts) >= 1 else ""
     airspace_block  = parts[1] if len(parts) >= 2 else ""
     incidents_block = parts[2] if len(parts) >= 3 else ""
@@ -222,7 +218,7 @@ def split_blocks_4(raw: str):
     return borders_block, airspace_block, incidents_block, airports_block
 
 # ----------------------------
-# Parsing: Borders (exact headers)
+# Parsing: Borders
 # ----------------------------
 def parse_borders(block: str):
     lines = [ln.strip() for ln in block.split("\n")]
@@ -249,15 +245,11 @@ def parse_borders(block: str):
         items.append({"name": header, "status": status, "bullets": bullets})
 
     if not items:
-        items.append({
-            "name": "Borders (format issue)",
-            "status": "",
-            "bullets": ["Could not detect border headers. Ensure exact header lines are used."]
-        })
+        items.append({"name": "Borders (format issue)", "status": "", "bullets": ["Could not detect border headers."]})
     return items
 
 # ----------------------------
-# Parsing: Airspace (Country status; optional notes after ';')
+# Parsing: Airspace
 # ----------------------------
 def parse_airspace(block: str):
     lines = [ln.strip() for ln in block.split("\n") if ln.strip()]
@@ -295,7 +287,7 @@ def parse_airspace(block: str):
     return items
 
 # ----------------------------
-# Parsing: Incident lists (block #3)
+# Parsing: Incidents
 # ----------------------------
 def parse_incident_lists(block: str):
     def norm(s: str) -> str:
@@ -332,24 +324,22 @@ def render_chips(title: str, items: list[str], *, variant: str):
     chips = "".join([f'<span class="chip {cls}">{html_lib.escape(c)}</span>' for c in items])
     empty = '<div class="notes">—</div>' if not items else ""
     st.markdown(
-        f"""
-        <div class="card">
-          <div class="name">{html_lib.escape(title)}</div>
-          <div class="chip-wrap">{chips}</div>
-          {empty}
-        </div>
-        """,
+        f'<div class="card">'
+        f'<div class="name">{html_lib.escape(title)}</div>'
+        f'<div class="chip-wrap">{chips}</div>'
+        f'{empty}'
+        f'</div>',
         unsafe_allow_html=True
     )
 
 # ----------------------------
-# Parsing: Key Airports (block #4)
+# Parsing: Key Airports
 # ----------------------------
 def parse_key_airports(block: str):
     lines = [ln.strip() for ln in block.split("\n") if ln.strip()]
     if not lines:
         return []
-    if lines and lines[0].strip().lower() == "key airports":
+    if lines[0].strip().lower() == "key airports":
         lines = lines[1:]
 
     airports = []
@@ -361,12 +351,8 @@ def parse_key_airports(block: str):
             airports.append((ln.strip(), ""))
     return airports
 
-def render_airports_via_component(airports: list[tuple[str, str]]):
-    """
-    Uses components.html to reliably render HTML (avoids markdown escaping issues).
-    Height is calculated from number of rows so it doesn't create scrollbars.
-    """
-    rows_html = []
+def render_airports(airports: list[tuple[str, str]]):
+    rows = []
     for a_name, a_status in airports:
         s = (a_status or "").strip().lower()
         cls = "airport-unknown"
@@ -381,28 +367,23 @@ def render_airports_via_component(airports: list[tuple[str, str]]):
             cls = "airport-partial"
             label = "PARTIAL"
 
-        rows_html.append(
-            f"""
-            <div class="airport-row">
-              <div class="airport-name">{html_lib.escape(a_name)}</div>
-              <div class="airport-status {cls}">{html_lib.escape(label)}</div>
-            </div>
-            """
+        # IMPORTANT: no leading indentation -> avoids Markdown code block rendering
+        rows.append(
+            f'<div class="airport-row">'
+            f'<div class="airport-name">{html_lib.escape(a_name)}</div>'
+            f'<div class="airport-status {cls}">{html_lib.escape(label)}</div>'
+            f'</div>'
         )
 
-    body = "\n".join(rows_html) if rows_html else '<div class="notes" style="margin-top:10px;">—</div>'
+    body = "".join(rows) if rows else '<div class="notes" style="margin-top:10px;">—</div>'
 
-    # Wrap in a "card" so it matches the rest of the UI
-    html_block = f"""
-    <div class="card">
-      <div class="name">Key Airports</div>
-      {body}
-    </div>
-    """
-
-    # height: header + padding + each row ~38px
-    height = 90 + (len(airports) * 42)
-    components.html(html_block, height=height, scrolling=False)
+    st.markdown(
+        f'<div class="card">'
+        f'<div class="name">Key Airports</div>'
+        f'{body}'
+        f'</div>',
+        unsafe_allow_html=True
+    )
 
 # ----------------------------
 # Load + parse
@@ -425,12 +406,10 @@ if m_asof:
 # Header
 # ----------------------------
 st.markdown(
-    f"""
-    <div class="topbar">
-      <div class="title">Middle East - Status</div>
-      <div class="meta"><b>AS OF:</b> {html_lib.escape(as_of) if as_of else "—"}</div>
-    </div>
-    """,
+    f'<div class="topbar">'
+    f'<div class="title">Middle East - Status</div>'
+    f'<div class="meta"><b>AS OF:</b> {html_lib.escape(as_of) if as_of else "—"}</div>'
+    f'</div>',
     unsafe_allow_html=True
 )
 
@@ -475,4 +454,4 @@ with c3:
     render_chips("No Active Incidents", inactive_countries, variant="clear")
 
     st.markdown('<div class="section-title">KEY AIRPORTS</div>', unsafe_allow_html=True)
-    render_airports_via_component(key_airports)
+    render_airports(key_airports)
