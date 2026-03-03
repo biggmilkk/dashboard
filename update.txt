@@ -71,6 +71,6 @@ Kuwait
 ------------------
 
 Key Airports
-Muscat International Airport: Open
-Riyadh International Airport: Open
-Dubai International Airport: Closed
+Muscat International Airport (MCT): Open
+Riyadh International Airport (RUH): Open
+Dubai International Airport (DXB): Closed
