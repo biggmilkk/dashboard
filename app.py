@@ -45,7 +45,7 @@ CSS = """
     background: #0f1620;
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 14px;
-    padding: 10px 12px 8px 12px;
+    padding: 10px 12px 10px 12px;
     margin-bottom: 8px;
   }
   .name { font-size: 19px; font-weight: 950; margin: 0; line-height: 1.1; }
@@ -79,6 +79,23 @@ CSS = """
     border-color: rgba(82,196,26,0.45);
     background: rgba(82,196,26,0.10);
   }
+
+  /* Airport rows */
+  .airport-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: baseline;
+    padding: 8px 0;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+  .airport-row:first-of-type { border-top: none; }
+  .airport-name { font-size: 15px; font-weight: 900; line-height: 1.15; }
+  .airport-status { font-size: 16px; font-weight: 950; letter-spacing: 0.2px; }
+  .airport-open { color: rgba(82,196,26,1.0); }
+  .airport-closed { color: rgba(255,77,79,1.0); }
+  .airport-partial { color: rgba(255,169,64,1.0); }
+  .airport-unknown { color: rgba(230,237,243,0.75); }
 
   div[data-testid="column"] { padding-top: 0px; }
   .block-container { padding-top: 1.0rem; padding-bottom: 0.8rem; }
@@ -144,7 +161,6 @@ def clamp_text(s: str, max_len: int) -> str:
 
 def infer_status_from_text(text: str) -> str:
     t = (text or "").lower()
-
     open_hit = bool(re.search(r"\bopen\b|\bremains open\b", t))
     closed_hit = bool(re.search(r"\bclosed\b|\breportedly closed\b|\ball other\b.*\bclosed\b", t))
     partial_hit = bool(re.search(r"\bpartial\b", t))
@@ -180,7 +196,6 @@ def render_card(
 
     bullets = [b.strip() for b in (bullets or []) if b and b.strip()]
     bullets = bullets[:max_bullets]
-
     if truncate:
         bullets = [clamp_text(b, max_bullet_len) for b in bullets]
 
@@ -206,8 +221,8 @@ def split_blocks(raw: str):
     parts = [p for p in parts if p]
     borders_block = parts[0] if len(parts) >= 1 else ""
     airspace_block = parts[1] if len(parts) >= 2 else ""
-    incidents_block = parts[2] if len(parts) >= 3 else ""
-    return borders_block, airspace_block, incidents_block
+    third_block = parts[2] if len(parts) >= 3 else ""
+    return borders_block, airspace_block, third_block
 
 # ----------------------------
 # Parsing: Borders (exact headers)
@@ -283,48 +298,73 @@ def parse_airspace(block: str):
     return items
 
 # ----------------------------
-# Parsing: Incident Lists (robust headings)
+# Parsing: 3rd block (Incidents + Key Airports)
 # ----------------------------
-def parse_incident_lists(block: str):
+def parse_third_block(block: str):
     """
-    Headings are detected flexibly, so minor spacing/case differences won't break it.
-    Accepts:
-      - Active Incidents in past 1H
-      - Active incidents in past 1h
-      - Active Incidents (past 1H)
-      - No Active Incidents
+    Expected subsections (order can vary, but typically):
+      Active Incidents in past 1H
+      <countries>
+
+      No Active Incidents
+      <countries>
+
+      Key Airports
+      <Airport Name>: <Status>
     """
-    def norm_line(s: str) -> str:
+    def norm(s: str) -> str:
         s = s.replace("\u00a0", " ")
         s = re.sub(r"\s+", " ", s).strip().lower()
         return s
 
     lines = [ln.strip() for ln in block.split("\n")]
+    mode = None  # "active", "inactive", "airports"
     active, inactive = [], []
-    mode = None
+    airports = []  # list of (name, status)
 
     for ln in lines:
-        if not ln.strip():
+        if not ln:
             continue
 
-        n = norm_line(ln)
+        n = norm(ln)
 
-        if re.fullmatch(r"active incidents in past 1h", n) or re.fullmatch(r"active incidents \(past 1h\)", n):
+        if n in ("active incidents in past 1h", "active incidents (past 1h)"):
             mode = "active"
             continue
-        if re.fullmatch(r"no active incidents", n):
+        if n == "no active incidents":
             mode = "inactive"
+            continue
+        if n == "key airports":
+            mode = "airports"
             continue
 
         if mode == "active":
-            active.append(ln.strip())
+            active.append(ln)
         elif mode == "inactive":
-            inactive.append(ln.strip())
+            inactive.append(ln)
+        elif mode == "airports":
+            # Expect "Airport Name: Open"
+            if ":" in ln:
+                a_name, a_status = ln.split(":", 1)
+                airports.append((a_name.strip(), a_status.strip()))
+            else:
+                # if someone forgets ':', keep it as name with unknown status
+                airports.append((ln.strip(), ""))
 
-    # de-dupe + sort
-    active = sorted({c for c in active if c}, key=str.casefold)
-    inactive = sorted({c for c in inactive if c}, key=str.casefold)
-    return active, inactive
+    active = sorted({c.strip() for c in active if c.strip()}, key=str.casefold)
+    inactive = sorted({c.strip() for c in inactive if c.strip()}, key=str.casefold)
+
+    # Keep airports in the same order you paste (no sorting), but de-dupe exact duplicates
+    seen = set()
+    cleaned_airports = []
+    for n, s in airports:
+        key = (n.casefold(), s.casefold())
+        if key not in seen:
+            seen.add(key)
+            cleaned_airports.append((n, s))
+    airports = cleaned_airports
+
+    return active, inactive, airports
 
 def render_chips(title: str, items: list[str], *, variant: str):
     cls = "chip-active" if variant == "active" else "chip-clear"
@@ -341,17 +381,54 @@ def render_chips(title: str, items: list[str], *, variant: str):
         unsafe_allow_html=True
     )
 
+def render_airports(title: str, airports: list[tuple[str, str]]):
+    rows = []
+    for a_name, a_status in airports:
+        s = (a_status or "").strip().lower()
+        cls = "airport-unknown"
+        label = a_status.strip() if a_status else "—"
+        if s.startswith("open"):
+            cls = "airport-open"
+            label = "OPEN"
+        elif s.startswith("closed"):
+            cls = "airport-closed"
+            label = "CLOSED"
+        elif s.startswith("partial"):
+            cls = "airport-partial"
+            label = "PARTIAL"
+
+        rows.append(
+            f"""
+            <div class="airport-row">
+              <div class="airport-name">{html.escape(a_name)}</div>
+              <div class="airport-status {cls}">{html.escape(label)}</div>
+            </div>
+            """
+        )
+
+    body = "\n".join(rows) if rows else '<div class="notes" style="margin-top:10px;">—</div>'
+
+    st.markdown(
+        f"""
+        <div class="card">
+          <div class="name">{html.escape(title)}</div>
+          {body}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 # ----------------------------
 # Load + parse
 # ----------------------------
 raw = normalize(load_update("update.txt"))
-borders_block, airspace_block, incidents_block = split_blocks(raw)
+borders_block, airspace_block, third_block = split_blocks(raw)
 
 borders = parse_borders(borders_block)
 airspace = parse_airspace(airspace_block)
-active_countries, inactive_countries = parse_incident_lists(incidents_block)
+active_countries, inactive_countries, key_airports = parse_third_block(third_block)
 
-# Optional: detect "As of Month Day" or "As of Month Day" (your format)
+# As-of detector
 as_of = ""
 m_asof = re.search(r"(?i)\bas of\s+([A-Za-z]+\s+\d{1,2})", raw)
 if m_asof:
@@ -385,7 +462,7 @@ with c1:
             show_placeholder=True,
             max_bullets=3,
             max_bullet_len=210,
-            truncate=True,
+            truncate=True
         )
 
 with c2:
@@ -402,14 +479,11 @@ with c2:
                 show_placeholder=False,
                 max_bullets=1,
                 max_bullet_len=140,
-                truncate=True,
+                truncate=True
             )
 
 with c3:
     st.markdown('<div class="section-title">INCIDENT STATUS</div>', unsafe_allow_html=True)
     render_chips("Active Incidents (past 1H)", active_countries, variant="active")
     render_chips("No Active Incidents", inactive_countries, variant="clear")
-
-    # Minimal admin hint if nothing parsed (won't affect ops much)
-    if not active_countries and not inactive_countries:
-        st.markdown('<div class="notes">Tip: Ensure the 3rd block contains the two headings and country lines beneath them.</div>', unsafe_allow_html=True)
+    render_airports("Key Airports", key_airports)
