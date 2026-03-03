@@ -56,6 +56,29 @@ CSS = """
   .status-partial   { color: rgba(255,169,64,1.0); }
   .status-restrict  { color: rgba(250,219,20,1.0); }
 
+  /* Incident chips */
+  .chip-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.04);
+    font-size: 16px;
+    font-weight: 950;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+  }
+  .chip-active {
+    border-color: rgba(255,77,79,0.55);
+    background: rgba(255,77,79,0.12);
+  }
+  .chip-clear {
+    border-color: rgba(82,196,26,0.45);
+    background: rgba(82,196,26,0.10);
+  }
+
   div[data-testid="column"] { padding-top: 0px; }
   .block-container { padding-top: 1.0rem; padding-bottom: 0.8rem; }
 </style>
@@ -119,11 +142,6 @@ def clamp_text(s: str, max_len: int) -> str:
     return s[: max_len - 1].rstrip() + "…"
 
 def infer_status_from_text(text: str) -> str:
-    """
-    Border status inference with a 'partial' rule:
-    - If both OPEN-like and CLOSED-like signals exist, show PARTIAL.
-    - This handles cases like Israel-Jordan: one crossing open, others closed.
-    """
     t = (text or "").lower()
 
     open_hit = bool(re.search(r"\bopen\b|\bremains open\b", t))
@@ -131,15 +149,10 @@ def infer_status_from_text(text: str) -> str:
     partial_hit = bool(re.search(r"\bpartial\b", t))
     restrict_hit = "restrict" in t
 
-    # Explicit partial
     if partial_hit:
         return "partial"
-
-    # Mixed signals => partial
     if open_hit and (closed_hit or restrict_hit):
         return "partial"
-
-    # Otherwise normal precedence
     if restrict_hit:
         return "restricted"
     if closed_hit:
@@ -195,8 +208,8 @@ def split_blocks(raw: str):
     parts = [p for p in parts if p]
     borders_block = parts[0] if len(parts) >= 1 else ""
     airspace_block = parts[1] if len(parts) >= 2 else ""
-    impacts_block = parts[2] if len(parts) >= 3 else ""
-    return borders_block, airspace_block, impacts_block
+    incidents_block = parts[2] if len(parts) >= 3 else ""  # now incidents lists, not impacts text
+    return borders_block, airspace_block, incidents_block
 
 # ----------------------------
 # Parsing: Borders (exact headers)
@@ -275,75 +288,81 @@ def parse_airspace(block: str):
     return items
 
 # ----------------------------
-# Parsing: Impacts (exact headers: Country:)
+# Parsing: Incident Lists (Active past 1H / No Active)
 # ----------------------------
-def parse_impacts(block: str):
-    lines = [ln.rstrip() for ln in block.split("\n")]
+def parse_incident_lists(block: str):
+    """
+    Expected format:
 
-    cleaned = []
+    Active Incidents in past 1H
+    KSA
+    ...
+
+    No Active Incidents
+    Oman
+    Iran
+    ...
+
+    Rules:
+    - Country names are one per line.
+    - Headings are exact (case-insensitive match).
+    """
+    lines = [ln.strip() for ln in block.split("\n")]
+    active = []
+    inactive = []
+
+    mode = None  # "active" or "inactive"
     for ln in lines:
-        if re.match(r"(?i)^\s*Confirmed impacts", ln.strip()):
-            continue
-        cleaned.append(ln)
-    lines = cleaned
-
-    items = []
-    current_country = None
-    buf = []
-
-    def flush():
-        nonlocal current_country, buf, items
-        if current_country is None:
-            buf = []
-            return
-        text = " ".join([b.strip() for b in buf if b.strip()]).strip()
-
-        bullets = []
-        if text:
-            parts = re.split(r"(?<=[.!?])\s+", text)
-            for p in parts:
-                p = p.strip()
-                if p:
-                    bullets.append(p)
-                if len(bullets) >= 2:
-                    break
-
-        items.append({"country": current_country, "bullets": bullets})
-        current_country, buf = None, []
-
-    for ln in lines:
-        s = ln.strip()
-        if not s:
+        if not ln:
             continue
 
-        m = re.match(r"^([A-Za-z][A-Za-z\s\-/]+):\s*(.*)$", s)
-        if m:
-            flush()
-            current_country = m.group(1).strip()
-            remainder = m.group(2).strip()
-            if remainder:
-                buf.append(remainder)
-        else:
-            if current_country is not None:
-                buf.append(s)
+        if ln.lower() == "active incidents in past 1h":
+            mode = "active"
+            continue
+        if ln.lower() == "no active incidents":
+            mode = "inactive"
+            continue
 
-    flush()
+        # anything else is a country line under the current mode
+        if mode == "active":
+            active.append(ln)
+        elif mode == "inactive":
+            inactive.append(ln)
 
-    if not items:
-        items.append({"country": "Impacts (no entries)", "bullets": []})
+    # Clean + sort alphabetically
+    active = sorted({c.strip() for c in active if c.strip()}, key=str.casefold)
+    inactive = sorted({c.strip() for c in inactive if c.strip()}, key=str.casefold)
 
-    return items
+    return active, inactive
+
+def render_chips(title: str, items: list[str], *, variant: str):
+    """
+    variant: 'active' or 'clear'
+    """
+    cls = "chip-active" if variant == "active" else "chip-clear"
+    chips = "".join([f'<span class="chip {cls}">{st._escape_html(c)}</span>' for c in items]) if items else ""
+    empty = '<span class="notes">—</span>' if not items else ""
+    st.markdown(
+        f"""
+        <div class="card">
+          <div class="name">{title}</div>
+          <div class="notes" style="margin-top:10px;">
+            <div class="chip-wrap">{chips}{empty}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 # ----------------------------
 # Load + parse
 # ----------------------------
 raw = normalize(load_update("update.txt"))
-borders_block, airspace_block, impacts_block = split_blocks(raw)
+borders_block, airspace_block, incidents_block = split_blocks(raw)
 
 borders = parse_borders(borders_block)
 airspace = parse_airspace(airspace_block)
-impacts = parse_impacts(impacts_block)
-impacts = sorted(impacts, key=lambda x: x.get("country","").casefold())
+active_countries, inactive_countries = parse_incident_lists(incidents_block)
 
 # Optional: detect "as of Month Day" anywhere
 as_of = ""
@@ -401,18 +420,7 @@ with c2:
             )
 
 with c3:
-    st.markdown('<div class="section-title">CONFIRMED STRIKE IMPACTS</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">INCIDENT STATUS</div>', unsafe_allow_html=True)
 
-    i_left, i_right = st.columns(2, gap="small")
-    for idx, i in enumerate(impacts):
-        target = i_left if idx % 2 == 0 else i_right
-        with target:
-            render_card(
-                i["country"],
-                "",
-                i["bullets"],
-                show_placeholder=True,   # show "—" for empty entries like "Oman:"
-                max_bullets=2,
-                max_bullet_len=9999,     # ignored if truncate=False
-                truncate=False           # <-- NO truncation for strike impacts
-            )
+    render_chips("Active Incidents (past 1H)", active_countries, variant="active")
+    render_chips("No Active Incidents", inactive_countries, variant="clear")
