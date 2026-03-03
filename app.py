@@ -212,7 +212,7 @@ def render_card(
 
 def split_blocks_4(raw: str):
     """
-    Your file is now:
+    update.txt:
       1) Borders
       ------------------
       2) Airspace
@@ -355,18 +355,9 @@ def render_chips(title: str, items: list[str], *, variant: str):
 # Parsing: Key Airports (block #4)
 # ----------------------------
 def parse_key_airports(block: str):
-    """
-    Expected:
-      Key Airports
-      Muscat International Airport: Open
-      Riyadh International Airport: Open
-      Dubai International Airport: Closed
-    """
     lines = [ln.strip() for ln in block.split("\n") if ln.strip()]
     if not lines:
         return []
-
-    # drop header if present
     if lines and lines[0].strip().lower() == "key airports":
         lines = lines[1:]
 
@@ -377,7 +368,6 @@ def parse_key_airports(block: str):
             airports.append((a_name.strip(), a_status.strip()))
         else:
             airports.append((ln.strip(), ""))
-
     return airports
 
 def render_airports(airports: list[tuple[str, str]]):
@@ -406,18 +396,6 @@ def render_airports(airports: list[tuple[str, str]]):
         )
 
     body = "\n".join(rows_html) if rows_html else '<div class="notes" style="margin-top:10px;">—</div>'
-
-    st.markdown(
-        f"""
-        <div class="card">
-          <div class="name">Key Airports</div>
-          {body}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    body = "\n".join(rows) if rows else '<div class="notes" style="margin-top:10px;">—</div>'
 
     st.markdown(
         f"""
