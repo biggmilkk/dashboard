@@ -379,7 +379,6 @@ def render_airports(airports: list[tuple[str, str]]):
 
     st.markdown(
         f'<div class="card">'
-        f'<div class="name">Key Airports</div>'
         f'{body}'
         f'</div>',
         unsafe_allow_html=True
