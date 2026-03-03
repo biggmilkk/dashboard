@@ -36,9 +36,9 @@ Agarak/Norduz BXP open 24/7. No reports of delays.
 
 AIRSPACE
 
-KSA open; absorbing reroutes from northern corridors.
-Oman open; flight availability impacted by regional airspace closures and specific airline cancellations.
-UAE partial; restricted by Emergency Security Control of Air Traffic (ESCAT) zones, effectively limiting commercial air traffic.
+KSA open
+Oman open
+UAE partial
 Bahrain closed
 Cyprus open
 Egypt open
@@ -49,9 +49,8 @@ Jordan partial; closed 18:00-09:00 nightly until further notice.
 Kuwait closed
 Lebanon open
 Qatar closed
-Syria closed; until at least 23:59 March 2.
-Turkiye open; limited flights to the Gulf.
-
+Syria closed
+Turkiye open
 
 ------------------
 
@@ -68,3 +67,10 @@ Qatar
 Cyprus
 Lebanon
 Kuwait
+
+------------------
+
+Key Airports
+Muscat International Airport: Open
+Riyadh International Airport: Open
+Dubai International Airport: Closed
