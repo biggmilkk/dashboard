@@ -1,7 +1,8 @@
 import re
 from pathlib import Path
-import html
+import html as html_lib
 import streamlit as st
+import streamlit.components.v1 as components
 from streamlit_autorefresh import st_autorefresh
 
 # ----------------------------
@@ -127,7 +128,7 @@ def load_update(path="update.txt") -> str:
 
 def normalize(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\u00a0", " ")
-    text = re.sub(r"(?m)^\s*-{6,}\s*$", "------------------", text)  # normalize separators
+    text = re.sub(r"(?m)^\s*-{6,}\s*$", "------------------", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
 
@@ -194,7 +195,7 @@ def render_card(
         bullets = [clamp_text(b, max_bullet_len) for b in bullets]
 
     if bullets:
-        notes_html = "<br/>".join([f"• {html.escape(b)}" for b in bullets])
+        notes_html = "<br/>".join([f"• {html_lib.escape(b)}" for b in bullets])
         notes_html = f'<div class="notes">{notes_html}</div>'
     else:
         notes_html = '<div class="notes">• —</div>' if show_placeholder else ""
@@ -202,7 +203,7 @@ def render_card(
     st.markdown(
         f"""
         <div class="card">
-          <div class="name">{html.escape(name)}</div>
+          <div class="name">{html_lib.escape(name)}</div>
           {status_html}
           {notes_html}
         </div>
@@ -211,16 +212,6 @@ def render_card(
     )
 
 def split_blocks_4(raw: str):
-    """
-    update.txt:
-      1) Borders
-      ------------------
-      2) Airspace
-      ------------------
-      3) Incident lists
-      ------------------
-      4) Key airports
-    """
     parts = [p.strip() for p in raw.split("------------------")]
     parts = [p for p in parts if p]
 
@@ -338,12 +329,12 @@ def parse_incident_lists(block: str):
 
 def render_chips(title: str, items: list[str], *, variant: str):
     cls = "chip-active" if variant == "active" else "chip-clear"
-    chips = "".join([f'<span class="chip {cls}">{html.escape(c)}</span>' for c in items])
+    chips = "".join([f'<span class="chip {cls}">{html_lib.escape(c)}</span>' for c in items])
     empty = '<div class="notes">—</div>' if not items else ""
     st.markdown(
         f"""
         <div class="card">
-          <div class="name">{html.escape(title)}</div>
+          <div class="name">{html_lib.escape(title)}</div>
           <div class="chip-wrap">{chips}</div>
           {empty}
         </div>
@@ -370,7 +361,11 @@ def parse_key_airports(block: str):
             airports.append((ln.strip(), ""))
     return airports
 
-def render_airports(airports: list[tuple[str, str]]):
+def render_airports_via_component(airports: list[tuple[str, str]]):
+    """
+    Uses components.html to reliably render HTML (avoids markdown escaping issues).
+    Height is calculated from number of rows so it doesn't create scrollbars.
+    """
     rows_html = []
     for a_name, a_status in airports:
         s = (a_status or "").strip().lower()
@@ -389,23 +384,25 @@ def render_airports(airports: list[tuple[str, str]]):
         rows_html.append(
             f"""
             <div class="airport-row">
-              <div class="airport-name">{html.escape(a_name)}</div>
-              <div class="airport-status {cls}">{html.escape(label)}</div>
+              <div class="airport-name">{html_lib.escape(a_name)}</div>
+              <div class="airport-status {cls}">{html_lib.escape(label)}</div>
             </div>
             """
         )
 
     body = "\n".join(rows_html) if rows_html else '<div class="notes" style="margin-top:10px;">—</div>'
 
-    st.markdown(
-        f"""
-        <div class="card">
-          <div class="name">Key Airports</div>
-          {body}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    # Wrap in a "card" so it matches the rest of the UI
+    html_block = f"""
+    <div class="card">
+      <div class="name">Key Airports</div>
+      {body}
+    </div>
+    """
+
+    # height: header + padding + each row ~38px
+    height = 90 + (len(airports) * 42)
+    components.html(html_block, height=height, scrolling=False)
 
 # ----------------------------
 # Load + parse
@@ -431,7 +428,7 @@ st.markdown(
     f"""
     <div class="topbar">
       <div class="title">Middle East - Status</div>
-      <div class="meta"><b>AS OF:</b> {html.escape(as_of) if as_of else "—"}</div>
+      <div class="meta"><b>AS OF:</b> {html_lib.escape(as_of) if as_of else "—"}</div>
     </div>
     """,
     unsafe_allow_html=True
@@ -478,4 +475,4 @@ with c3:
     render_chips("No Active Incidents", inactive_countries, variant="clear")
 
     st.markdown('<div class="section-title">KEY AIRPORTS</div>', unsafe_allow_html=True)
-    render_airports(key_airports)
+    render_airports_via_component(key_airports)
