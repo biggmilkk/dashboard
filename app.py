@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 # ----------------------------
 # Page config (no sidebar, wall-screen friendly)
@@ -11,6 +12,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+st_autorefresh(interval=15 * 60 * 1000, key="auto_refresh_15min")  # 15 minutes
 
 # ----------------------------
 # Low-glare dark styling + larger headers/status + tighter spacing
