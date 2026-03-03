@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+import html
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
@@ -57,7 +58,7 @@ CSS = """
   .status-restrict  { color: rgba(250,219,20,1.0); }
 
   /* Incident chips */
-  .chip-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip-wrap { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .chip {
     display: inline-flex;
     align-items: center;
@@ -184,18 +185,15 @@ def render_card(
         bullets = [clamp_text(b, max_bullet_len) for b in bullets]
 
     if bullets:
-        notes_html = "<br/>".join([f"• {b}" for b in bullets])
+        notes_html = "<br/>".join([f"• {html.escape(b)}" for b in bullets])
         notes_html = f'<div class="notes">{notes_html}</div>'
     else:
-        if show_placeholder:
-            notes_html = '<div class="notes">• —</div>'
-        else:
-            notes_html = ""
+        notes_html = '<div class="notes">• —</div>' if show_placeholder else ""
 
     st.markdown(
         f"""
         <div class="card">
-          <div class="name">{name}</div>
+          <div class="name">{html.escape(name)}</div>
           {status_html}
           {notes_html}
         </div>
@@ -208,7 +206,7 @@ def split_blocks(raw: str):
     parts = [p for p in parts if p]
     borders_block = parts[0] if len(parts) >= 1 else ""
     airspace_block = parts[1] if len(parts) >= 2 else ""
-    incidents_block = parts[2] if len(parts) >= 3 else ""  # now incidents lists, not impacts text
+    incidents_block = parts[2] if len(parts) >= 3 else ""
     return borders_block, airspace_block, incidents_block
 
 # ----------------------------
@@ -244,7 +242,6 @@ def parse_borders(block: str):
             "status": "",
             "bullets": ["Could not detect border headers. Ensure exact header lines are used."]
         })
-
     return items
 
 # ----------------------------
@@ -276,7 +273,6 @@ def parse_airspace(block: str):
                 notes = (rest + ((" " + notes) if notes else "")).strip()
 
         notes = capitalize_first_alpha(notes)
-
         if notes.lower().strip(". ") == country.lower().strip(". "):
             notes = ""
 
@@ -284,71 +280,62 @@ def parse_airspace(block: str):
 
     if not items:
         items.append({"country": "Airspace (no entries)", "status": "", "notes": ""})
-
     return items
 
 # ----------------------------
-# Parsing: Incident Lists (Active past 1H / No Active)
+# Parsing: Incident Lists (robust headings)
 # ----------------------------
 def parse_incident_lists(block: str):
     """
-    Expected format:
-
-    Active Incidents in past 1H
-    KSA
-    ...
-
-    No Active Incidents
-    Oman
-    Iran
-    ...
-
-    Rules:
-    - Country names are one per line.
-    - Headings are exact (case-insensitive match).
+    Headings are detected flexibly, so minor spacing/case differences won't break it.
+    Accepts:
+      - Active Incidents in past 1H
+      - Active incidents in past 1h
+      - Active Incidents (past 1H)
+      - No Active Incidents
     """
-    lines = [ln.strip() for ln in block.split("\n")]
-    active = []
-    inactive = []
+    def norm_line(s: str) -> str:
+        s = s.replace("\u00a0", " ")
+        s = re.sub(r"\s+", " ", s).strip().lower()
+        return s
 
-    mode = None  # "active" or "inactive"
+    lines = [ln.strip() for ln in block.split("\n")]
+    active, inactive = [], []
+    mode = None
+
     for ln in lines:
-        if not ln:
+        if not ln.strip():
             continue
 
-        if ln.lower() == "active incidents in past 1h":
+        n = norm_line(ln)
+
+        if re.fullmatch(r"active incidents in past 1h", n) or re.fullmatch(r"active incidents \(past 1h\)", n):
             mode = "active"
             continue
-        if ln.lower() == "no active incidents":
+        if re.fullmatch(r"no active incidents", n):
             mode = "inactive"
             continue
 
-        # anything else is a country line under the current mode
         if mode == "active":
-            active.append(ln)
+            active.append(ln.strip())
         elif mode == "inactive":
-            inactive.append(ln)
+            inactive.append(ln.strip())
 
-    # Clean + sort alphabetically
-    active = sorted({c.strip() for c in active if c.strip()}, key=str.casefold)
-    inactive = sorted({c.strip() for c in inactive if c.strip()}, key=str.casefold)
-
+    # de-dupe + sort
+    active = sorted({c for c in active if c}, key=str.casefold)
+    inactive = sorted({c for c in inactive if c}, key=str.casefold)
     return active, inactive
 
 def render_chips(title: str, items: list[str], *, variant: str):
-    """
-    variant: 'active' or 'clear'
-    """
     cls = "chip-active" if variant == "active" else "chip-clear"
-    chips = "".join([f'<span class="chip {cls}">{st._escape_html(c)}</span>' for c in items]) if items else ""
-    empty = '<span class="notes">—</span>' if not items else ""
+    chips = "".join([f'<span class="chip {cls}">{html.escape(c)}</span>' for c in items])
+    empty = '<div class="notes">—</div>' if not items else ""
     st.markdown(
         f"""
         <div class="card">
-          <div class="name">{title}</div>
-          <div class="notes" style="margin-top:10px;">
-            <div class="chip-wrap">{chips}{empty}</div>
-          </div>
+          <div class="name">{html.escape(title)}</div>
+          <div class="chip-wrap">{chips}</div>
+          {empty}
         </div>
         """,
         unsafe_allow_html=True
@@ -364,7 +351,7 @@ borders = parse_borders(borders_block)
 airspace = parse_airspace(airspace_block)
 active_countries, inactive_countries = parse_incident_lists(incidents_block)
 
-# Optional: detect "as of Month Day" anywhere
+# Optional: detect "As of Month Day" or "As of Month Day" (your format)
 as_of = ""
 m_asof = re.search(r"(?i)\bas of\s+([A-Za-z]+\s+\d{1,2})", raw)
 if m_asof:
@@ -377,7 +364,7 @@ st.markdown(
     f"""
     <div class="topbar">
       <div class="title">Middle East - Status</div>
-      <div class="meta"><b>AS OF:</b> {as_of or "—"}</div>
+      <div class="meta"><b>AS OF:</b> {html.escape(as_of) if as_of else "—"}</div>
     </div>
     """,
     unsafe_allow_html=True
@@ -398,12 +385,11 @@ with c1:
             show_placeholder=True,
             max_bullets=3,
             max_bullet_len=210,
-            truncate=True
+            truncate=True,
         )
 
 with c2:
     st.markdown('<div class="section-title">AIRSPACE</div>', unsafe_allow_html=True)
-
     a_left, a_right = st.columns(2, gap="small")
     for idx, a in enumerate(airspace):
         bullets = [a["notes"]] if a.get("notes") else []
@@ -413,14 +399,17 @@ with c2:
                 a["country"],
                 a["status"],
                 bullets,
-                show_placeholder=False,   # no "• —" in airspace
+                show_placeholder=False,
                 max_bullets=1,
                 max_bullet_len=140,
-                truncate=True
+                truncate=True,
             )
 
 with c3:
     st.markdown('<div class="section-title">INCIDENT STATUS</div>', unsafe_allow_html=True)
-
     render_chips("Active Incidents (past 1H)", active_countries, variant="active")
     render_chips("No Active Incidents", inactive_countries, variant="clear")
+
+    # Minimal admin hint if nothing parsed (won't affect ops much)
+    if not active_countries and not inactive_countries:
+        st.markdown('<div class="notes">Tip: Ensure the 3rd block contains the two headings and country lines beneath them.</div>', unsafe_allow_html=True)
