@@ -104,7 +104,7 @@ CSS = """
 st.markdown(CSS, unsafe_allow_html=True)
 
 # ----------------------------
-# Your declared "truth"
+# Truth: exact border headers
 # ----------------------------
 BORDER_HEADERS = [
     "UAE-Oman",
@@ -133,14 +133,10 @@ def normalize(text: str) -> str:
 
 def status_class(status: str) -> str:
     s = (status or "").strip().lower()
-    if s == "closed":
-        return "status-closed"
-    if s == "partial":
-        return "status-partial"
-    if s in ("restricted", "restrict", "restriction"):
-        return "status-restrict"
-    if s == "open":
-        return "status-open"
+    if s == "closed": return "status-closed"
+    if s == "partial": return "status-partial"
+    if s in ("restricted", "restrict", "restriction"): return "status-restrict"
+    if s == "open": return "status-open"
     return ""
 
 def capitalize_first_alpha(s: str) -> str:
@@ -155,9 +151,7 @@ def capitalize_first_alpha(s: str) -> str:
 
 def clamp_text(s: str, max_len: int) -> str:
     s = (s or "").strip()
-    if len(s) <= max_len:
-        return s
-    return s[: max_len - 1].rstrip() + "…"
+    return s if len(s) <= max_len else s[: max_len - 1].rstrip() + "…"
 
 def infer_status_from_text(text: str) -> str:
     t = (text or "").lower()
@@ -216,13 +210,25 @@ def render_card(
         unsafe_allow_html=True
     )
 
-def split_blocks(raw: str):
+def split_blocks_4(raw: str):
+    """
+    Your file is now:
+      1) Borders
+      ------------------
+      2) Airspace
+      ------------------
+      3) Incident lists
+      ------------------
+      4) Key airports
+    """
     parts = [p.strip() for p in raw.split("------------------")]
     parts = [p for p in parts if p]
-    borders_block = parts[0] if len(parts) >= 1 else ""
-    airspace_block = parts[1] if len(parts) >= 2 else ""
-    third_block = parts[2] if len(parts) >= 3 else ""
-    return borders_block, airspace_block, third_block
+
+    borders_block   = parts[0] if len(parts) >= 1 else ""
+    airspace_block  = parts[1] if len(parts) >= 2 else ""
+    incidents_block = parts[2] if len(parts) >= 3 else ""
+    airports_block  = parts[3] if len(parts) >= 4 else ""
+    return borders_block, airspace_block, incidents_block, airports_block
 
 # ----------------------------
 # Parsing: Borders (exact headers)
@@ -298,34 +304,20 @@ def parse_airspace(block: str):
     return items
 
 # ----------------------------
-# Parsing: 3rd block (Incidents + Key Airports)
+# Parsing: Incident lists (block #3)
 # ----------------------------
-def parse_third_block(block: str):
-    """
-    Expected subsections (order can vary, but typically):
-      Active Incidents in past 1H
-      <countries>
-
-      No Active Incidents
-      <countries>
-
-      Key Airports
-      <Airport Name>: <Status>
-    """
+def parse_incident_lists(block: str):
     def norm(s: str) -> str:
         s = s.replace("\u00a0", " ")
-        s = re.sub(r"\s+", " ", s).strip().lower()
-        return s
+        return re.sub(r"\s+", " ", s).strip().lower()
 
     lines = [ln.strip() for ln in block.split("\n")]
-    mode = None  # "active", "inactive", "airports"
     active, inactive = [], []
-    airports = []  # list of (name, status)
+    mode = None
 
     for ln in lines:
         if not ln:
             continue
-
         n = norm(ln)
 
         if n in ("active incidents in past 1h", "active incidents (past 1h)"):
@@ -334,37 +326,15 @@ def parse_third_block(block: str):
         if n == "no active incidents":
             mode = "inactive"
             continue
-        if n == "key airports":
-            mode = "airports"
-            continue
 
         if mode == "active":
             active.append(ln)
         elif mode == "inactive":
             inactive.append(ln)
-        elif mode == "airports":
-            # Expect "Airport Name: Open"
-            if ":" in ln:
-                a_name, a_status = ln.split(":", 1)
-                airports.append((a_name.strip(), a_status.strip()))
-            else:
-                # if someone forgets ':', keep it as name with unknown status
-                airports.append((ln.strip(), ""))
 
     active = sorted({c.strip() for c in active if c.strip()}, key=str.casefold)
     inactive = sorted({c.strip() for c in inactive if c.strip()}, key=str.casefold)
-
-    # Keep airports in the same order you paste (no sorting), but de-dupe exact duplicates
-    seen = set()
-    cleaned_airports = []
-    for n, s in airports:
-        key = (n.casefold(), s.casefold())
-        if key not in seen:
-            seen.add(key)
-            cleaned_airports.append((n, s))
-    airports = cleaned_airports
-
-    return active, inactive, airports
+    return active, inactive
 
 def render_chips(title: str, items: list[str], *, variant: str):
     cls = "chip-active" if variant == "active" else "chip-clear"
@@ -381,7 +351,36 @@ def render_chips(title: str, items: list[str], *, variant: str):
         unsafe_allow_html=True
     )
 
-def render_airports(title: str, airports: list[tuple[str, str]]):
+# ----------------------------
+# Parsing: Key Airports (block #4)
+# ----------------------------
+def parse_key_airports(block: str):
+    """
+    Expected:
+      Key Airports
+      Muscat International Airport: Open
+      Riyadh International Airport: Open
+      Dubai International Airport: Closed
+    """
+    lines = [ln.strip() for ln in block.split("\n") if ln.strip()]
+    if not lines:
+        return []
+
+    # drop header if present
+    if lines and lines[0].strip().lower() == "key airports":
+        lines = lines[1:]
+
+    airports = []
+    for ln in lines:
+        if ":" in ln:
+            a_name, a_status = ln.split(":", 1)
+            airports.append((a_name.strip(), a_status.strip()))
+        else:
+            airports.append((ln.strip(), ""))
+
+    return airports
+
+def render_airports(airports: list[tuple[str, str]]):
     rows = []
     for a_name, a_status in airports:
         s = (a_status or "").strip().lower()
@@ -411,7 +410,7 @@ def render_airports(title: str, airports: list[tuple[str, str]]):
     st.markdown(
         f"""
         <div class="card">
-          <div class="name">{html.escape(title)}</div>
+          <div class="name">Key Airports</div>
           {body}
         </div>
         """,
@@ -422,13 +421,14 @@ def render_airports(title: str, airports: list[tuple[str, str]]):
 # Load + parse
 # ----------------------------
 raw = normalize(load_update("update.txt"))
-borders_block, airspace_block, third_block = split_blocks(raw)
+borders_block, airspace_block, incidents_block, airports_block = split_blocks_4(raw)
 
 borders = parse_borders(borders_block)
 airspace = parse_airspace(airspace_block)
-active_countries, inactive_countries, key_airports = parse_third_block(third_block)
+active_countries, inactive_countries = parse_incident_lists(incidents_block)
+key_airports = parse_key_airports(airports_block)
 
-# As-of detector
+# As-of detector (matches "As of March 3")
 as_of = ""
 m_asof = re.search(r"(?i)\bas of\s+([A-Za-z]+\s+\d{1,2})", raw)
 if m_asof:
@@ -486,4 +486,6 @@ with c3:
     st.markdown('<div class="section-title">INCIDENT STATUS</div>', unsafe_allow_html=True)
     render_chips("Active Incidents (past 1H)", active_countries, variant="active")
     render_chips("No Active Incidents", inactive_countries, variant="clear")
-    render_airports("Key Airports", key_airports)
+
+    st.markdown('<div class="section-title">KEY AIRPORTS</div>', unsafe_allow_html=True)
+    render_airports(key_airports)
