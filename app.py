@@ -381,7 +381,7 @@ def parse_key_airports(block: str):
     return airports
 
 def render_airports(airports: list[tuple[str, str]]):
-    rows = []
+    rows_html = []
     for a_name, a_status in airports:
         s = (a_status or "").strip().lower()
         cls = "airport-unknown"
@@ -396,7 +396,7 @@ def render_airports(airports: list[tuple[str, str]]):
             cls = "airport-partial"
             label = "PARTIAL"
 
-        rows.append(
+        rows_html.append(
             f"""
             <div class="airport-row">
               <div class="airport-name">{html.escape(a_name)}</div>
@@ -404,6 +404,18 @@ def render_airports(airports: list[tuple[str, str]]):
             </div>
             """
         )
+
+    body = "\n".join(rows_html) if rows_html else '<div class="notes" style="margin-top:10px;">—</div>'
+
+    st.markdown(
+        f"""
+        <div class="card">
+          <div class="name">Key Airports</div>
+          {body}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
     body = "\n".join(rows) if rows else '<div class="notes" style="margin-top:10px;">—</div>'
 
